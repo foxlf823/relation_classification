@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import pyt_acnn as pa
+import math
 
 
 def squash(inputs, axis=-1):
@@ -45,6 +46,10 @@ class DenseCapsule(nn.Module):
         self.out_dim_caps = out_dim_caps
         self.routings = routings
         self.weight = nn.Parameter(0.01 * torch.randn(out_num_caps, in_num_caps, out_dim_caps, in_dim_caps))
+        
+#         stdv = 1. / math.sqrt(in_dim_caps*in_num_caps) 
+#         self.weight = nn.Parameter(torch.zeros(out_num_caps, in_num_caps, out_dim_caps, in_dim_caps))
+#         self.weight.data.uniform_(-stdv, stdv)
 
     def forward(self, x):
         # x.size=[batch, in_num_caps, in_dim_caps]

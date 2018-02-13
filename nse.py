@@ -7,7 +7,7 @@ import pyt_acnn as pa
 class NSE(nn.Module): 
     def __init__(self, max_len, embedding, pos_embed_size,
              pos_embed_num, slide_window, class_num,
-             num_filters, keep_prob):
+             num_filters, keep_prob, embfinetune):
         
         super(NSE, self).__init__()
         self.dw = embedding.shape[1]# word emb size
@@ -25,8 +25,11 @@ class NSE(nn.Module):
         self.lstm_layers = 1
         
         self.pad_emb = pa.myCuda(Variable(torch.zeros(1, self.dw)))
-#         self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
-        self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
+        
+        if embfinetune:
+            self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+        else:
+            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
         
         self.read_lstm = nn.LSTM(self.dw, self.dw, self.lstm_layers)
         self.compose_l1 = nn.Linear(2*self.dw, 2*self.dw)

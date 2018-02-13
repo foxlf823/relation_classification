@@ -11,11 +11,11 @@ class CapsuleNet(nn.Module):
 
     def __init__(self, max_len, embedding, pos_embed_size,
              pos_embed_num, slide_window, class_num,
-             num_filters, keep_prob, routings):
+             num_filters, keep_prob, routings, embfinetune, pad_embfinetune):
         super(CapsuleNet, self).__init__()
         
         self.dw = embedding.shape[1]# word emb size
-        self.vac_len = embedding.shape[0]
+        self.vac_len = embedding.shape[0]+1
         self.dp = pos_embed_size # position emb size
         self.d = self.dw + 2 * self.dp # word representation size
         self.np = pos_embed_num # position emb number
@@ -25,11 +25,27 @@ class CapsuleNet(nn.Module):
 
         self.routings = routings
         
-        self.pad_emb = pa.myCuda(Variable(torch.zeros(1, self.dw)))
-        self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
-#         self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
-        self.dist1_embedding = nn.Embedding(self.np, self.dp)
-        self.dist2_embedding = self.dist1_embedding
+        if pad_embfinetune:
+            self.pad_emb = pa.myCuda(Variable(torch.randn(1, self.dw), requires_grad=True))
+        else:
+            self.pad_emb = pa.myCuda(Variable(torch.zeros(1, self.dw)))
+        
+        if embfinetune:
+#             self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+            self.other_emb = nn.Parameter(torch.from_numpy(embedding[:, :]))
+        else:
+#             self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
+            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[:, :])))
+        
+        if self.dp != 0:
+            if pad_embfinetune:
+                self.pad_pos_emb = pa.myCuda(Variable(torch.randn(1, self.dp), requires_grad=True))
+            else:
+                self.pad_pos_emb = pa.myCuda(Variable(torch.zeros(1, self.dp)))
+            self.other_pos_emb = nn.Parameter(torch.FloatTensor(self.np-1, self.dp))
+            self.other_pos_emb.data.normal_(0, 1)
+#             self.dist1_embedding = nn.Embedding(self.np, self.dp)
+#             self.dist2_embedding = self.dist1_embedding
 
         # Layer 1: Just a conventional Conv2D layer
         self.conv1 = nn.Conv2d(1, 256, kernel_size=(self.k, self.d), stride=1, padding=0)
@@ -42,7 +58,16 @@ class CapsuleNet(nn.Module):
         self.digitcaps = DenseCapsule(in_num_caps=32*lastlast, in_dim_caps=8,
                                       out_num_caps=self.nr, out_dim_caps=16, routings=routings)
 
+#         self.linear = nn.Linear(self.n*self.d, self.nr)
+        
         self.relu = nn.ReLU()
+        
+#         x = pa.myCuda(Variable(torch.LongTensor([[word_dict['has']]*self.n]*2)))
+#         x_embedding = torch.cat((self.pad_emb, self.other_emb),0) 
+#         x_embed = torch.matmul(pa.one_hot2(x.contiguous().view(2,self.n,1), self.vac_len), x_embedding)
+#         pass
+#         a = nn.Linear(111,222)
+#         pass
 
     def forward(self, x, e1, e2, dist1, dist2):
         
@@ -51,15 +76,25 @@ class CapsuleNet(nn.Module):
         x_embedding = torch.cat((self.pad_emb, self.other_emb),0) 
         x_embed = torch.matmul(pa.one_hot2(x.contiguous().view(bz,self.n,1), self.vac_len), x_embedding)
 
-        dist1_embed = self.dist1_embedding(dist1) # (batch, length, postion_dim)
-        dist2_embed = self.dist2_embedding(dist2) # (batch, length, postion_dim)
-        x_concat = torch.cat((x_embed, dist1_embed, dist2_embed), 2) # (batch, length, word_dim+2*postion_dim)
+        if self.dp !=0:
+#             dist1_embed = self.dist1_embedding(dist1) # (batch, length, postion_dim)
+#             dist2_embed = self.dist2_embedding(dist2) # (batch, length, postion_dim)
+            pos_embedding = torch.cat((self.other_pos_emb, self.pad_pos_emb),0)
+            dist1_embed = torch.matmul(pa.one_hot2(dist1.contiguous().view(bz,self.n,1), self.np), pos_embedding)
+            dist2_embed = torch.matmul(pa.one_hot2(dist2.contiguous().view(bz,self.n,1), self.np), pos_embedding)
+
+            x_concat = torch.cat((x_embed, dist1_embed, dist2_embed), 2) # (batch, length, word_dim+2*postion_dim)
+        else:
+            x_concat = x_embed
+            
         x_concat = x_concat.view(bz, 1, self.n, self.d)
         
         y = self.relu(self.conv1(x_concat))
         y = self.primarycaps(y)
         y = self.digitcaps(y)
         y = y.norm(dim=-1)
+
+#         y = self.linear(x_concat.view(bz, -1))
 
         return y
 

@@ -40,7 +40,7 @@ def one_hot2(indices, depth, value=1):
 class ACNN(nn.Module): 
     def __init__(self, max_len, embedding, pos_embed_size,
              pos_embed_num, slide_window, class_num,
-             num_filters, keep_prob, use_cuda):
+             num_filters, keep_prob, use_cuda, embfinetune):
         
         super(ACNN, self).__init__()
         self.dw = embedding.shape[1]# word emb size
@@ -61,8 +61,10 @@ class ACNN(nn.Module):
         if use_cuda:
             self.pad_emb = self.pad_emb.cuda()
             
-
-        self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+        if embfinetune:
+            self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+        else:
+            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
         
         self.dist1_embedding = nn.Embedding(self.np, self.dp)
         self.dist2_embedding = self.dist1_embedding
