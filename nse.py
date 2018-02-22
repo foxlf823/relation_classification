@@ -7,11 +7,11 @@ import pyt_acnn as pa
 class NSE(nn.Module): 
     def __init__(self, max_len, embedding, pos_embed_size,
              pos_embed_num, slide_window, class_num,
-             num_filters, keep_prob, embfinetune):
+             num_filters, keep_prob, embfinetune, pad_embfinetune):
         
         super(NSE, self).__init__()
         self.dw = embedding.shape[1]# word emb size
-        self.vac_len = embedding.shape[0]
+        self.vac_len = embedding.shape[0]+1
         self.dp = pos_embed_size # position emb size
         self.d = self.dw + 2 * self.dp # word representation size
         self.np = pos_embed_num # position emb number
@@ -24,12 +24,15 @@ class NSE(nn.Module):
         self.kd = self.d * self.k # convolutional filter input size
         self.lstm_layers = 1
         
-        self.pad_emb = pa.myCuda(Variable(torch.zeros(1, self.dw)))
+        if pad_embfinetune:
+            self.pad_emb = pa.myCuda(Variable(torch.randn(1, self.dw), requires_grad=True))
+        else:
+            self.pad_emb = pa.myCuda(Variable(torch.zeros(1, self.dw)))
         
         if embfinetune:
-            self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+            self.other_emb = nn.Parameter(torch.from_numpy(embedding[:, :]))
         else:
-            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
+            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[:, :])))
         
         self.read_lstm = nn.LSTM(self.dw, self.dw, self.lstm_layers)
         self.compose_l1 = nn.Linear(2*self.dw, 2*self.dw)

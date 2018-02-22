@@ -50,6 +50,10 @@ parser.add_argument('--cased', '-cased', default=0, type=int, help='if 1, words 
 parser.add_argument('--mannual_seed', '-seed', default=0, type=int, help='if 0, randomly; else, fix the seed with the given value')
 parser.add_argument('--optimizer', '-opt', default=0, type=int, help='if 0, adam; else, sgd')
 parser.add_argument('--padfinetune', '-padtune', default=0, type=int, help='if 1, pad and position pad are tuned; if 0, not tuned')
+parser.add_argument('--usewordbetween', '-uwb', default=0, type=int, help='if 1, use only the words between two entities; if 0, use the whole sentence')
+parser.add_argument('--use_crcnn_loss', '-ucrloss', default=0, type=int, help='if 1, use CR-CNN loss; if 0, use Cap loss')
+parser.add_argument('--include_other', '-other', default=1, type=int, help='if 1, use other; if 0, exclude it')
+
 
 
 print("List all parameters...")
@@ -77,6 +81,9 @@ CASED = bool(args.cased)
 SEED = args.mannual_seed
 OPTIMIZER = args.optimizer
 PAD_EMB_TUNE = bool(args.padfinetune)
+USE_WORD_BETWEEN = bool(args.usewordbetween)
+USE_CRCNN_LOSS = bool(args.use_crcnn_loss)
+INCLUDE_OTHER = bool(args.include_other)
 
 data_dir = args.data_dir
 preemb_dir = args.pretrained_emb_dir
@@ -96,8 +103,8 @@ if os.path.exists(result_dir):
 else:
     os.mkdir(result_dir)  
 
-data = pro.load_data(data_dir+'/train.txt', CASED)
-t_data = pro.load_data(data_dir+'/test.txt', CASED)
+data = pro.load_data(data_dir+'/train.txt', CASED, USE_WORD_BETWEEN, INCLUDE_OTHER)
+t_data = pro.load_data(data_dir+'/test.txt', CASED, USE_WORD_BETWEEN, INCLUDE_OTHER)
 print("Load data")
 # word_dict = pro.build_dict(data[0])
 # t_word_dict = pro.build_dict(t_data[0])
@@ -133,15 +140,15 @@ embed_file = preemb_dir
 embedding = pro.load_embedding_from_glove(embed_file, word_dict, CASED)
 
 if MODEL == 0:
-    model = pa.myCuda(pa.ACNN(N, embedding, DP, len(position_dict), K, NR, DC, KP, use_cuda, EMB_TUNE))
+    model = pa.myCuda(pa.ACNN(N, embedding, DP, len(position_dict), K, NR, DC, KP, use_cuda, EMB_TUNE, PAD_EMB_TUNE))
     loss_func = pa.NovelDistanceLoss(NR)
     logger.info('MODEL: Using attention CNN')
 elif MODEL == 1:
-    model = pa.myCuda(capsulenet.CapsuleNet(N, embedding, DP, len(position_dict), K, NR, DC, KP, 3, EMB_TUNE, PAD_EMB_TUNE))
-    loss_func = capsulenet.caps_loss
+    model = pa.myCuda(capsulenet.CapsuleNet(N, embedding, DP, len(position_dict), K, NR, DC, 
+                                            KP, 3, EMB_TUNE, PAD_EMB_TUNE, USE_CRCNN_LOSS, INCLUDE_OTHER))
     logger.info('MODEL: Using capsule CNN')
 else:
-    model = pa.myCuda(nse.NSE(N, embedding, DP, len(position_dict), K, NR, DC, KP, EMB_TUNE))
+    model = pa.myCuda(nse.NSE(N, embedding, DP, len(position_dict), K, NR, DC, KP, EMB_TUNE, PAD_EMB_TUNE))
     loss_func = model.loss
     logger.info('MODEL: Using NSE')
     torch.backends.cudnn.enabled = False
@@ -161,7 +168,10 @@ best = -1
 train = torch.from_numpy(np_cat.astype(np.int64))
 y_tensor = torch.LongTensor(y)
 train_datasets = D.TensorDataset(data_tensor=train, target_tensor=y_tensor)
-train_dataloader = D.DataLoader(train_datasets, BATCH_SIZE, False, num_workers=1)
+if SEED != 0:
+    train_dataloader = D.DataLoader(train_datasets, BATCH_SIZE, False, num_workers=1)
+else:
+    train_dataloader = D.DataLoader(train_datasets, BATCH_SIZE, True, num_workers=1)
 
 eval = torch.from_numpy(eval_cat.astype(np.int64))
 y_tensor = torch.LongTensor(e_y)
@@ -185,9 +195,9 @@ for i in range(epochs):
                 acc += acc_
         elif MODEL == 1:
             y_pred = model(bx, be1, be2, bd1, bd2)  # forward
-            l = loss_func(by, y_pred)  # compute loss
+            l = model.loss_func(by, y_pred)  # compute loss
             if i != 0 and i % 20 == 0:
-                acc_, predict  = capsulenet.predict(by, y_pred) 
+                acc_, predict  = model.predict(by, y_pred) 
                 acc += acc_    
         else:
             y_pred, M_t = model(bx, be1, be2, bd1, bd2)  # forward
@@ -220,7 +230,7 @@ for i in range(epochs):
             eval_acc_, predict = loss_func.prediction(wo, rel_weight, by, NR)
         elif MODEL == 1:
             y_pred = model(bx, be1, be2, bd1, bd2)  
-            eval_acc_, predict  = capsulenet.predict(by, y_pred)  
+            eval_acc_, predict  = model.predict(by, y_pred)  
         else:
             y_pred, M_t = model(bx, be1, be2, bd1, bd2)  
             eval_acc_, predict  = model.predict(by, y_pred)
@@ -235,7 +245,7 @@ for i in range(epochs):
         print('epoch: {}, exceed best {}'.format(i, best))
         best = eval_acc / ti 
         torch.save(model.state_dict(), result_dir+'/{}_acnn_params.pkl'.format(i))
-        pro.outputToSem10rc(predicts, result_dir+'/{}_result.txt'.format(i))
+        pro.outputToSem10rc(predicts, result_dir+'/{}_result.txt'.format(i), INCLUDE_OTHER)
 
 
 # model.load_state_dict(torch.load('acnn_params.pkl'))

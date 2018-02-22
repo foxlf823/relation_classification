@@ -49,13 +49,33 @@ def relationID2Name(id):
     else:
         logger.debug('unknown relation id {} !!!!!!!!'.format(id))
         return None;
+
+# when_not_use_other, use this function to map other to the last id
+def rawID2innerID(id):
+    if id == 0:
+        return 0
+    elif id == 1:
+        return 18
+    else:
+        return id-1
     
-def outputToSem10rc(ids, path):
+def innerID2rawID(id):
+    if id == 0:
+        return 0
+    elif id == 18:
+        return 1
+    else:
+        return id+1
+    
+def outputToSem10rc(ids, path, include_other):
     startSentID = 8001
     
     with open(path, 'w') as f:
         for id in ids:
-            f.write('{}\t{}\n'.format(startSentID, relationID2Name(id)))
+            if include_other:
+                f.write('{}\t{}\n'.format(startSentID, relationID2Name(id)))
+            else:
+                f.write('{}\t{}\n'.format(startSentID, relationID2Name(innerID2rawID(id))))
             
             startSentID += 1
 
@@ -104,7 +124,7 @@ def normalizeWord(word, cased):
     return newword
 
 
-def load_data(file, cased):
+def load_data(file, cased, use_word_between, include_other):
     sentences = []
     relations = []
     e1_pos = []
@@ -117,13 +137,28 @@ def load_data(file, cased):
         for line in f.readlines():
 
             line = line.strip().split()
-            relations.append(int(line[0]))
-            e1_pos.append((int(line[1]), int(line[2])))  # (start_pos, end_pos)
-            e2_pos.append((int(line[3]), int(line[4])))  # (start_pos, end_pos)
-
-            sentences.append(normalizeWordList(line[5:], cased))
             
-            sentence_length = len(line[5:])
+            if include_other:
+                relations.append(int(line[0]))
+            else:
+                relations.append(rawID2innerID(int(line[0])))
+
+            word_list = line[5:]
+
+            if use_word_between:
+                begin = int(line[1])
+                end = int(line[4])
+                e1_pos.append((0, int(line[2])-begin))  # (start_pos, end_pos)
+                e2_pos.append((int(line[3])-begin, end-begin))  # (start_pos, end_pos)
+                sentences.append(normalizeWordList(word_list[begin:end+1], cased))
+                sentence_length = end+1-begin
+            else:
+                e1_pos.append((int(line[1]), int(line[2])))  # (start_pos, end_pos)
+                e2_pos.append((int(line[3]), int(line[4])))  # (start_pos, end_pos)
+                sentences.append(normalizeWordList(word_list, cased))
+                sentence_length = len(word_list)
+            
+            
 
             if sentence_length > max_len:
                 max_len = sentence_length

@@ -40,11 +40,11 @@ def one_hot2(indices, depth, value=1):
 class ACNN(nn.Module): 
     def __init__(self, max_len, embedding, pos_embed_size,
              pos_embed_num, slide_window, class_num,
-             num_filters, keep_prob, use_cuda, embfinetune):
+             num_filters, keep_prob, use_cuda, embfinetune, pad_embfinetune):
         
         super(ACNN, self).__init__()
         self.dw = embedding.shape[1]# word emb size
-        self.vac_len = embedding.shape[0]
+        self.vac_len = embedding.shape[0]+1
         self.dp = pos_embed_size # position emb size
         self.d = self.dw + 2 * self.dp # word representation size
         self.np = pos_embed_num # position emb number
@@ -57,14 +57,15 @@ class ACNN(nn.Module):
         self.kd = self.d * self.k # convolutional filter input size
         self.dropout = nn.Dropout(1-self.keep_prob)
         
-        self.pad_emb = Variable(torch.zeros(1, self.dw))
-        if use_cuda:
-            self.pad_emb = self.pad_emb.cuda()
-            
-        if embfinetune:
-            self.other_emb = nn.Parameter(torch.from_numpy(embedding[1:, :]))
+        if pad_embfinetune:
+            self.pad_emb = myCuda(Variable(torch.randn(1, self.dw), requires_grad=True))
         else:
-            self.other_emb = pa.myCuda(Variable(torch.from_numpy(embedding[1:, :])))
+            self.pad_emb = myCuda(Variable(torch.zeros(1, self.dw)))
+        
+        if embfinetune:
+            self.other_emb = nn.Parameter(torch.from_numpy(embedding[:, :]))
+        else:
+            self.other_emb = myCuda(Variable(torch.from_numpy(embedding[:, :])))
         
         self.dist1_embedding = nn.Embedding(self.np, self.dp)
         self.dist2_embedding = self.dist1_embedding
