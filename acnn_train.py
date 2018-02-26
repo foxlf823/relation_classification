@@ -2,11 +2,13 @@ import data_pro as pro
 import pyt_acnn as pa
 import capsulenet
 import nse
+import resnet
 import os
 import torch
 
 import torch.utils.data as D
 from torch.autograd import Variable
+import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 from sklearn.model_selection import KFold
@@ -53,6 +55,7 @@ parser.add_argument('--padfinetune', '-padtune', default=0, type=int, help='if 1
 parser.add_argument('--usewordbetween', '-uwb', default=0, type=int, help='if 1, use only the words between two entities; if 0, use the whole sentence')
 parser.add_argument('--use_crcnn_loss', '-ucrloss', default=0, type=int, help='if 1, use CR-CNN loss; if 0, use Cap loss')
 parser.add_argument('--include_other', '-other', default=1, type=int, help='if 1, use other; if 0, exclude it')
+parser.add_argument('--layers', '-layers', default=6, type=int, help='res net layers, must be divided by 6.')
 
 
 
@@ -84,6 +87,7 @@ PAD_EMB_TUNE = bool(args.padfinetune)
 USE_WORD_BETWEEN = bool(args.usewordbetween)
 USE_CRCNN_LOSS = bool(args.use_crcnn_loss)
 INCLUDE_OTHER = bool(args.include_other)
+RESNET_LAYERS = args.layers//6
 
 data_dir = args.data_dir
 preemb_dir = args.pretrained_emb_dir
@@ -147,12 +151,16 @@ elif MODEL == 1:
     model = pa.myCuda(capsulenet.CapsuleNet(N, embedding, DP, len(position_dict), K, NR, DC, 
                                             KP, 3, EMB_TUNE, PAD_EMB_TUNE, USE_CRCNN_LOSS, INCLUDE_OTHER))
     logger.info('MODEL: Using capsule CNN')
-else:
+elif MODEL == 2:
     model = pa.myCuda(nse.NSE(N, embedding, DP, len(position_dict), K, NR, DC, KP, EMB_TUNE, PAD_EMB_TUNE))
     loss_func = model.loss
     logger.info('MODEL: Using NSE')
     torch.backends.cudnn.enabled = False
-    
+elif MODEL == 3:
+    model = pa.myCuda(resnet.ResNet(N, embedding, DP, len(position_dict), K, NR, DC, KP, EMB_TUNE, 
+                                    PAD_EMB_TUNE, (RESNET_LAYERS,RESNET_LAYERS,RESNET_LAYERS)))
+    logger.info('MODEL: Using ResNet')
+    loss_func = model.loss
 # for para in model.parameters():
 #     print(para)
 
@@ -199,13 +207,18 @@ for i in range(epochs):
             if i != 0 and i % 20 == 0:
                 acc_, predict  = model.predict(by, y_pred) 
                 acc += acc_    
-        else:
+        elif MODEL == 2:
             y_pred, M_t = model(bx, be1, be2, bd1, bd2)  # forward
             l = loss_func(by, y_pred)  # compute loss
             if i != 0 and i % 20 == 0:
                 acc_, predict  = model.predict(by, y_pred) 
                 acc += acc_
-            
+        elif MODEL == 3:
+            y_pred = model(bx, be1, be2, bd1, bd2)  # forward
+            l = loss_func(by, y_pred)  # compute loss
+            if i != 0 and i % 20 == 0:
+                acc_, predict  = model.predict(by, y_pred) 
+                acc += acc_
 #         if j!=0 and j % PRINT_LOSS_ITER == 0:
 #             logger.debug('epoch: {}, batch: {}, loss {}'.format(i, j, l.data[0]))
         j += 1
@@ -231,9 +244,12 @@ for i in range(epochs):
         elif MODEL == 1:
             y_pred = model(bx, be1, be2, bd1, bd2)  
             eval_acc_, predict  = model.predict(by, y_pred)  
-        else:
+        elif MODEL == 2:
             y_pred, M_t = model(bx, be1, be2, bd1, bd2)  
             eval_acc_, predict  = model.predict(by, y_pred)
+        elif MODEL == 3:
+            y_pred = model(bx, be1, be2, bd1, bd2)  
+            eval_acc_, predict  = model.predict(by, y_pred)  
             
         eval_acc += eval_acc_
         predicts.extend(predict.data.tolist())
